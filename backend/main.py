@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import sqlite3
 
-app = FastAPI(title="Sistema de Gestão Full-Stack e Automação")
+app = FastAPI(title="Sistema de Gestão Full-Stack - CRUD Completo")
 
 app.add_middleware(
     CORSMiddleware,
@@ -58,6 +58,18 @@ def criar_item(item: Item):
     conn.close()
     return {"mensagem": "Item cadastrado com sucesso!"}
 
+@app.put("/api/itens/{item_id}")
+def atualizar_item(item_id: int, item: Item):
+    conn = sqlite3.connect("banco.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE itens SET nome = ?, quantidade = ? WHERE id = ?",
+        (item.nome, item.quantidade, item_id)
+    )
+    conn.commit()
+    conn.close()
+    return {"mensagem": f"Item {item_id} atualizado com sucesso!"}
+
 @app.delete("/api/itens/{item_id}")
 def deletar_item(item_id: int):
     conn = sqlite3.connect("banco.db")
@@ -82,7 +94,7 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel Full-Stack com Automação de Dados</title>
+    <title>Painel Full-Stack - CRUD com Edição</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -98,11 +110,11 @@ HTML_TEMPLATE = """
             padding: 30px;
             border-radius: 10px;
             box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-            width: 450px;
+            width: 480px;
             text-align: center;
         }
         h1 { color: #333; font-size: 20px; }
-        h3 { color: #0056b3; font-size: 15px; margin-top: 20px; text-align: left; border-bottom: 2px solid #0056b3; padding-bottom: 4px; }
+        h3 { color: #0056b3; font-size: 15px; margin-top: 15px; text-align: left; border-bottom: 2px solid #0056b3; padding-bottom: 4px; }
         input, button {
             width: 100%;
             padding: 8px;
@@ -113,9 +125,10 @@ HTML_TEMPLATE = """
         }
         .btn-salvar { background-color: #28a745; color: white; border: none; font-weight: bold; cursor: pointer; }
         .btn-salvar:hover { background-color: #218838; }
+        .btn-cancelar { background-color: #6c757d; color: white; border: none; font-weight: bold; cursor: pointer; display: none; margin-top: 5px;}
         .lista-container {
             text-align: left;
-            max-height: 130px;
+            max-height: 140px;
             overflow-y: auto;
             border: 1px solid #eee;
             background: #f9f9f9;
@@ -132,27 +145,31 @@ HTML_TEMPLATE = """
             border-bottom: 1px solid #e5e5e5;
             padding-bottom: 4px;
         }
-        .btn-excluir { background-color: #dc3545; color: white; border: none; padding: 3px 6px; border-radius: 3px; cursor: pointer; font-size: 11px; width: auto; margin: 0; }
+        .botoes-acao { display: flex; gap: 4px; }
+        .btn-editar { background-color: #ffc107; color: black; border: none; padding: 3px 6px; border-radius: 3px; cursor: pointer; font-size: 11px; }
+        .btn-excluir { background-color: #dc3545; color: white; border: none; padding: 3px 6px; border-radius: 3px; cursor: pointer; font-size: 11px; }
     </style>
 </head>
 <body>
     <div class="painel">
-        <h1>Dashboard & Automação</h1>
+        <h1>Dashboard & Estoque</h1>
         
-        <h3>Controle de Estoque</h3>
+        <h3 id="tituloForm">Cadastrar Novo Item</h3>
+        <input type="hidden" id="editandoId" value="">
         <input type="text" id="nomeItem" placeholder="Nome do Produto">
         <input type="number" id="qtdItem" placeholder="Quantidade">
-        <button class="btn-salvar" onclick="adicionarItem()">Salvar no Banco</button>
+        <button class="btn-salvar" id="btnSalvar" onclick="salvarItem()">Salvar no Banco</button>
+        <button class="btn-cancelar" id="btnCancelar" onclick="limparFormulario()">Cancelar Edição</button>
+
         <div class="lista-container" id="listaItens">Carregando estoque...</div>
 
-        <h3>Monitoramento de Dados Externos (ETL)</h3>
-        <div class="lista-container" id="listaLogs">Carregando logs de automação...</div>
+        <h3>Monitoramento de Dados (ETL)</h3>
+        <div class="lista-container" id="listaLogs">Carregando logs...</div>
     </div>
 
     <script>
         async function carregarTudo() {
             try {
-                // Carrega Estoque
                 const resEstoque = await fetch('/api/itens');
                 const jsonEstoque = await resEstoque.json();
                 const containerEstoque = document.getElementById('listaItens');
@@ -165,43 +182,73 @@ HTML_TEMPLATE = """
                         containerEstoque.innerHTML += `
                             <div class="item-row">
                                 <span>📦 <strong>${item.nome}</strong> (${item.quantidade})</span>
-                                <button class="btn-excluir" onclick="excluirItem(${item.id})">Excluir</button>
+                                <div class="botoes-acao">
+                                    <button class="btn-editar" onclick="prepararEdicao(${item.id}, '${item.nome}', ${item.quantidade})">Editar</button>
+                                    <button class="btn-excluir" onclick="excluirItem(${item.id})">Excluir</button>
+                                </div>
                             </div>
                         `;
                     });
                 }
 
-                // Carrega Logs da Automação
                 const resLogs = await fetch('/api/logs');
                 const jsonLogs = await resLogs.json();
                 const containerLogs = document.getElementById('listaLogs');
                 
                 if (jsonLogs.dados.length === 0) {
-                    containerLogs.innerHTML = "<p style='color: #666; text-align: center; margin: 5px;'>Nenhum log encontrado.</p>";
+                    containerLogs.innerHTML = "<p style='color: #666; text-align: center; margin: 5px;'>Nenhum log.</p>";
                 } else {
                     containerLogs.innerHTML = "";
                     jsonLogs.dados.forEach(log => {
-                        containerLogs.innerHTML += `<div>📈 <strong>${log.moeda}</strong>: R$ ${log.valor} <span style="color:#888; font-size:11px">(${log.data})</span></div>`;
+                        containerLogs.innerHTML += `<div>📈 <strong>${log.moeda}</strong>: R$ ${log.valor}</div>`;
                     });
                 }
             } catch (erro) {
-                console.error("Erro ao carregar dados:", erro);
+                console.error("Erro:", erro);
             }
         }
 
-        async function adicionarItem() {
+        async function salvarItem() {
+            const id = document.getElementById('editandoId').value;
             const nome = document.getElementById('nomeItem').value;
             const quantidade = document.getElementById('qtdItem').value;
-            if (!nome || !quantidade) return alert("Preencha os campos!");
 
-            await fetch('/api/itens', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ nome, quantidade: parseInt(quantidade) })
-            });
+            if (!nome || !quantidade) return alert("Preencha todos os campos!");
+
+            if (id === "") {
+                await fetch('/api/itens', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ nome, quantidade: parseInt(quantidade) })
+                });
+            } else {
+                await fetch(`/api/itens/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ nome, quantidade: parseInt(quantidade) })
+                });
+            }
+
+            limparFormulario();
+            carregarTudo();
+        }
+
+        function prepararEdicao(id, nome, quantidade) {
+            document.getElementById('editandoId').value = id;
+            document.getElementById('nomeItem').value = nome;
+            document.getElementById('qtdItem').value = quantidade;
+            document.getElementById('tituloForm').innerText = "Editando Item #" + id;
+            document.getElementById('btnSalvar').innerText = "Atualizar Item";
+            document.getElementById('btnCancelar').style.display = "block";
+        }
+
+        function limparFormulario() {
+            document.getElementById('editandoId').value = "";
             document.getElementById('nomeItem').value = "";
             document.getElementById('qtdItem').value = "";
-            carregarTudo();
+            document.getElementById('tituloForm').innerText = "Cadastrar Novo Item";
+            document.getElementById('btnSalvar').innerText = "Salvar no Banco";
+            document.getElementById('btnCancelar').style.display = "none";
         }
 
         async function excluirItem(id) {
