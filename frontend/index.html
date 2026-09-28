@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Gestão</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f7f6;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .painel {
+            background-color: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        h1 { color: #333; }
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #e0f7fa;
+            color: #006064;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="painel">
+        <h1>Meu Primeiro Sistema Full-Stack</h1>
+        <p>Abaixo está a resposta em tempo real do nosso servidor Back-end:</p>
+        
+        <div class="status" id="resultado-api">
+            Aguardando conexão com o servidor...
+        </div>
+    </div>
+<script>
+        async function conectarComBackend() {
+            const painelStatus = document.getElementById('resultado-api');
+            try {
+                // Tenta buscar os dados da porta 8000 (onde a API vai rodar)
+                const resposta = await fetch('/');
+                const dados = await resposta.json();
+                
+                // Se der certo, injeta os dados reais na tela e muda a cor para verde
+                painelStatus.innerHTML = `
+                    ✔️ <strong>Status:</strong> ${dados.status} <br><br>
+                    ⚙️ <strong>Ambiente:</strong> ${dados.ambiente}
+                `;
+                painelStatus.style.backgroundColor = '#d4edda';
+                painelStatus.style.color = '#155724';
+            } catch (erro) {
+                // Se o servidor estiver desligado, mostra o erro em vermelho
+                painelStatus.innerHTML = "❌ Erro: O servidor Back-end está desligado ou inacessível.";
+                painelStatus.style.backgroundColor = '#f8d7da';
+                painelStatus.style.color = '#721c24';
+            }
+        }
+
+        // Executa a função imediatamente ao abrir a página
+        conectarComBackend();
+    </script>
+</body>
+</html>
