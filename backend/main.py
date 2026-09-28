@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import sqlite3
 
-app = FastAPI(title="Sistema de Gestão Full-Stack - Blindado")
+app = FastAPI(title="Sistema de Gestão Full-Stack - Blindado e com Busca")
 
 app.add_middleware(
     CORSMiddleware,
@@ -36,7 +36,6 @@ def init_db():
 
 init_db()
 
-# --- MODELO BLINDADO COM PYDANTIC ---
 class Item(BaseModel):
     nome: str = Field(..., min_length=2, description="O nome deve ter pelo menos 2 caracteres")
     quantidade: int = Field(..., gt=0, description="A quantidade deve ser maior que zero")
@@ -95,7 +94,7 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel Full-Stack - Blindado</title>
+    <title>Painel Full-Stack - Busca Instantânea</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -173,6 +172,9 @@ HTML_TEMPLATE = """
         <button class="btn-salvar" id="btnSalvar" onclick="salvarItem()">Salvar no Banco</button>
         <button class="btn-cancelar" id="btnCancelar" onclick="limparFormulario()">Cancelar Edição</button>
 
+        <h3>Lista de Estoque</h3>
+        <!-- Campo de Pesquisa Instantânea -->
+        <input type="text" id="filtroBusca" placeholder="🔍 Pesquisar produto no estoque..." onkeyup="filtrarEstoque()">
         <div class="lista-container" id="listaItens">Carregando estoque...</div>
 
         <h3>Monitoramento de Dados (ETL)</h3>
@@ -180,6 +182,8 @@ HTML_TEMPLATE = """
     </div>
 
     <script>
+        let listaGlobalItens = [];
+
         function mostrarAlerta(texto, tipo) {
             const alerta = document.getElementById('mensagemAlerta');
             alerta.innerText = texto;
@@ -192,24 +196,9 @@ HTML_TEMPLATE = """
             try {
                 const resEstoque = await fetch('/api/itens');
                 const jsonEstoque = await resEstoque.json();
-                const containerEstoque = document.getElementById('listaItens');
+                listaGlobalItens = jsonEstoque.dados; // Salva na variável global
                 
-                if (jsonEstoque.dados.length === 0) {
-                    containerEstoque.innerHTML = "<p style='color: #666; text-align: center; margin: 5px;'>Nenhum item.</p>";
-                } else {
-                    containerEstoque.innerHTML = "";
-                    jsonEstoque.dados.forEach(item => {
-                        containerEstoque.innerHTML += `
-                            <div class="item-row">
-                                <span>📦 <strong>${item.nome}</strong> (${item.quantidade})</span>
-                                <div class="botoes-acao">
-                                    <button class="btn-editar" onclick="prepararEdicao(${item.id}, '${item.nome}', ${item.quantidade})">Editar</button>
-                                    <button class="btn-excluir" onclick="excluirItem(${item.id})">Excluir</button>
-                                </div>
-                            </div>
-                        `;
-                    });
-                }
+                renderizarItens(listaGlobalItens);
 
                 const resLogs = await fetch('/api/logs');
                 const jsonLogs = await resLogs.json();
@@ -226,6 +215,32 @@ HTML_TEMPLATE = """
             } catch (erro) {
                 console.error("Erro:", erro);
             }
+        }
+
+        function renderizarItens(itens) {
+            const containerEstoque = document.getElementById('listaItens');
+            if (itens.length === 0) {
+                containerEstoque.innerHTML = "<p style='color: #666; text-align: center; margin: 5px;'>Nenhum item encontrado.</p>";
+                return;
+            }
+            containerEstoque.innerHTML = "";
+            itens.forEach(item => {
+                containerEstoque.innerHTML += `
+                    <div class="item-row">
+                        <span>📦 <strong>${item.nome}</strong> (${item.quantidade})</span>
+                        <div class="botoes-acao">
+                            <button class="btn-editar" onclick="prepararEdicao(${item.id}, '${item.nome}', ${item.quantidade})">Editar</button>
+                            <button class="btn-excluir" onclick="excluirItem(${item.id})">Excluir</button>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        function filtrarEstoque() {
+            const termo = document.getElementById('filtroBusca').value.toLowerCase();
+            const filtrados = listaGlobalItens.filter(i => i.nome.toLowerCase().includes(termo));
+            renderizarItens(filtrados);
         }
 
         async function salvarItem() {
