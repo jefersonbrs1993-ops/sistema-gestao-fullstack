@@ -1,8 +1,10 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import sqlite3
 
-app = FastAPI(title="Sistema de Gestão Full-Stack")
+app = FastAPI(title="Sistema de Gestão Full-Stack e Automação")
 
 app.add_middleware(
     CORSMiddleware,
@@ -11,14 +13,76 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Página HTML integrada direto no Back-end
+def init_db():
+    conn = sqlite3.connect("banco.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS itens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL,
+            quantidade INTEGER NOT NULL
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS logs_automacao (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            moeda TEXT,
+            valor REAL,
+            data_coleta TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+init_db()
+
+class Item(BaseModel):
+    nome: str
+    quantidade: int
+
+@app.get("/api/itens")
+def listar_itens():
+    conn = sqlite3.connect("banco.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, nome, quantidade FROM itens")
+    rows = cursor.fetchall()
+    conn.close()
+    return {"status": "Sucesso", "dados": [{"id": r[0], "nome": r[1], "quantidade": r[2]} for r in rows]}
+
+@app.post("/api/itens")
+def criar_item(item: Item):
+    conn = sqlite3.connect("banco.db")
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO itens (nome, quantidade) VALUES (?, ?)", (item.nome, item.quantidade))
+    conn.commit()
+    conn.close()
+    return {"mensagem": "Item cadastrado com sucesso!"}
+
+@app.delete("/api/itens/{item_id}")
+def deletar_item(item_id: int):
+    conn = sqlite3.connect("banco.db")
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM itens WHERE id = ?", (item_id,))
+    conn.commit()
+    conn.close()
+    return {"mensagem": "Removido com sucesso!"}
+
+@app.get("/api/logs")
+def listar_logs():
+    conn = sqlite3.connect("banco.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT moeda, valor, data_coleta FROM logs_automacao ORDER BY id DESC LIMIT 5")
+    rows = cursor.fetchall()
+    conn.close()
+    return {"dados": [{"moeda": r[0], "valor": r[1], "data": r[2]} for r in rows]}
+
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistema de Gestão</title>
+    <title>Painel Full-Stack com Automação de Dados</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -31,45 +95,121 @@ HTML_TEMPLATE = """
         }
         .painel {
             background-color: white;
-            padding: 40px;
+            padding: 30px;
             border-radius: 10px;
             box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            width: 450px;
             text-align: center;
         }
-        h1 { color: #333; }
-        .status {
-            margin-top: 20px;
-            padding: 15px;
-            background-color: #e0f7fa;
-            color: #006064;
+        h1 { color: #333; font-size: 20px; }
+        h3 { color: #0056b3; font-size: 15px; margin-top: 20px; text-align: left; border-bottom: 2px solid #0056b3; padding-bottom: 4px; }
+        input, button {
+            width: 100%;
+            padding: 8px;
+            margin-top: 8px;
+            border: 1px solid #ccc;
             border-radius: 5px;
-            font-weight: bold;
+            box-sizing: border-box;
         }
+        .btn-salvar { background-color: #28a745; color: white; border: none; font-weight: bold; cursor: pointer; }
+        .btn-salvar:hover { background-color: #218838; }
+        .lista-container {
+            text-align: left;
+            max-height: 130px;
+            overflow-y: auto;
+            border: 1px solid #eee;
+            background: #f9f9f9;
+            padding: 6px;
+            border-radius: 4px;
+            margin-top: 5px;
+            font-size: 13px;
+        }
+        .item-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+            border-bottom: 1px solid #e5e5e5;
+            padding-bottom: 4px;
+        }
+        .btn-excluir { background-color: #dc3545; color: white; border: none; padding: 3px 6px; border-radius: 3px; cursor: pointer; font-size: 11px; width: auto; margin: 0; }
     </style>
 </head>
 <body>
     <div class="painel">
-        <h1>Meu Primeiro Sistema Full-Stack</h1>
-        <p>Abaixo está a resposta em tempo real do nosso servidor:</p>
-        <div class="status" id="resultado-api">Conectando ao servidor...</div>
+        <h1>Dashboard & Automação</h1>
+        
+        <h3>Controle de Estoque</h3>
+        <input type="text" id="nomeItem" placeholder="Nome do Produto">
+        <input type="number" id="qtdItem" placeholder="Quantidade">
+        <button class="btn-salvar" onclick="adicionarItem()">Salvar no Banco</button>
+        <div class="lista-container" id="listaItens">Carregando estoque...</div>
+
+        <h3>Monitoramento de Dados Externos (ETL)</h3>
+        <div class="lista-container" id="listaLogs">Carregando logs de automação...</div>
     </div>
 
     <script>
-        async function carregarDados() {
-            const painelStatus = document.getElementById('resultado-api');
+        async function carregarTudo() {
             try {
-                const resposta = await fetch('/api/status');
-                const dados = await resposta.json();
-                painelStatus.innerHTML = `✔️ <strong>Status:</strong> ${dados.status} <br><br> ⚙️ <strong>Ambiente:</strong> ${dados.ambiente}`;
-                painelStatus.style.backgroundColor = '#d4edda';
-                painelStatus.style.color = '#155724';
+                // Carrega Estoque
+                const resEstoque = await fetch('/api/itens');
+                const jsonEstoque = await resEstoque.json();
+                const containerEstoque = document.getElementById('listaItens');
+                
+                if (jsonEstoque.dados.length === 0) {
+                    containerEstoque.innerHTML = "<p style='color: #666; text-align: center; margin: 5px;'>Nenhum item.</p>";
+                } else {
+                    containerEstoque.innerHTML = "";
+                    jsonEstoque.dados.forEach(item => {
+                        containerEstoque.innerHTML += `
+                            <div class="item-row">
+                                <span>📦 <strong>${item.nome}</strong> (${item.quantidade})</span>
+                                <button class="btn-excluir" onclick="excluirItem(${item.id})">Excluir</button>
+                            </div>
+                        `;
+                    });
+                }
+
+                // Carrega Logs da Automação
+                const resLogs = await fetch('/api/logs');
+                const jsonLogs = await resLogs.json();
+                const containerLogs = document.getElementById('listaLogs');
+                
+                if (jsonLogs.dados.length === 0) {
+                    containerLogs.innerHTML = "<p style='color: #666; text-align: center; margin: 5px;'>Nenhum log encontrado.</p>";
+                } else {
+                    containerLogs.innerHTML = "";
+                    jsonLogs.dados.forEach(log => {
+                        containerLogs.innerHTML += `<div>📈 <strong>${log.moeda}</strong>: R$ ${log.valor} <span style="color:#888; font-size:11px">(${log.data})</span></div>`;
+                    });
+                }
             } catch (erro) {
-                painelStatus.innerHTML = "❌ Erro ao conectar com a API.";
-                painelStatus.style.backgroundColor = '#f8d7da';
-                painelStatus.style.color = '#721c24';
+                console.error("Erro ao carregar dados:", erro);
             }
         }
-        carregarDados();
+
+        async function adicionarItem() {
+            const nome = document.getElementById('nomeItem').value;
+            const quantidade = document.getElementById('qtdItem').value;
+            if (!nome || !quantidade) return alert("Preencha os campos!");
+
+            await fetch('/api/itens', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ nome, quantidade: parseInt(quantidade) })
+            });
+            document.getElementById('nomeItem').value = "";
+            document.getElementById('qtdItem').value = "";
+            carregarTudo();
+        }
+
+        async function excluirItem(id) {
+            await fetch(`/api/itens/${id}`, { method: 'DELETE' });
+            carregarTudo();
+        }
+
+        carregarTudo();
     </script>
 </body>
 </html>
@@ -78,7 +218,3 @@ HTML_TEMPLATE = """
 @app.get("/", response_class=HTMLResponse)
 def home():
     return HTML_TEMPLATE
-
-@app.get("/api/status")
-def api_status():
-    return {"status": "A API está no ar e conectada com sucesso!", "ambiente": "Desenvolvimento"}
