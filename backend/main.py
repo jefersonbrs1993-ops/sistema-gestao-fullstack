@@ -1,10 +1,20 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import sqlite3
+import logging
+import time
 
-app = FastAPI(title="Sistema de Gestão Full-Stack - Blindado e com Busca")
+# --- CONFIGURAÇÃO DE LOGS CORPORATIVOS ---
+logging.basicConfig(
+    filename="sistema.log",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    encoding="utf-8"
+)
+
+app = FastAPI(title="Sistema de Gestão Full-Stack - Logs Corporativos")
 
 app.add_middleware(
     CORSMiddleware,
@@ -13,26 +23,39 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Middleware para registrar automaticamente todas as requisições HTTP
+@app.middleware("http")
+async def log_requisicoes(request: Request, call_next):
+    inicio = time.time()
+    resposta = await call_next(request)
+    duracao = time.time() - inicio
+    logging.info(f"Rota: {request.url.path} | Metodo: {request.method} | Status: {resposta.status_code} | Tempo: {duracao:.4f}s")
+    return resposta
+
 def init_db():
-    conn = sqlite3.connect("banco.db")
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS itens (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome TEXT NOT NULL,
-            quantidade INTEGER NOT NULL
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS logs_automacao (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            moeda TEXT,
-            valor REAL,
-            data_coleta TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect("banco.db")
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS itens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome TEXT NOT NULL,
+                quantidade INTEGER NOT NULL
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS logs_automacao (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                moeda TEXT,
+                valor REAL,
+                data_coleta TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+        conn.close()
+        logging.info("Banco de dados inicializado com sucesso.")
+    except Exception as e:
+        logging.error(f"Erro ao inicializar o banco de dados: {e}")
 
 init_db()
 
@@ -42,51 +65,74 @@ class Item(BaseModel):
 
 @app.get("/api/itens")
 def listar_itens():
-    conn = sqlite3.connect("banco.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, nome, quantidade FROM itens")
-    rows = cursor.fetchall()
-    conn.close()
-    return {"status": "Sucesso", "dados": [{"id": r[0], "nome": r[1], "quantidade": r[2]} for r in rows]}
+    try:
+        conn = sqlite3.connect("banco.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, nome, quantidade FROM itens")
+        rows = cursor.fetchall()
+        conn.close()
+        return {"status": "Sucesso", "dados": [{"id": r[0], "nome": r[1], "quantidade": r[2]} for r in rows]}
+    except Exception as e:
+        logging.error(f"Erro ao listar itens: {e}")
+        raise HTTPException(status_code=500, detail="Erro interno no servidor.")
 
 @app.post("/api/itens")
 def criar_item(item: Item):
-    conn = sqlite3.connect("banco.db")
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO itens (nome, quantidade) VALUES (?, ?)", (item.nome, item.quantidade))
-    conn.commit()
-    conn.close()
-    return {"mensagem": "Item cadastrado com sucesso!"}
+    try:
+        conn = sqlite3.connect("banco.db")
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO itens (nome, quantidade) VALUES (?, ?)", (item.nome, item.quantidade))
+        conn.commit()
+        conn.close()
+        logging.info(f"Item criado com sucesso: {item.nome} (Qtd: {item.quantidade})")
+        return {"mensagem": "Item cadastrado com sucesso!"}
+    except Exception as e:
+        logging.error(f"Erro ao criar item: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao salvar no banco.")
 
 @app.put("/api/itens/{item_id}")
 def atualizar_item(item_id: int, item: Item):
-    conn = sqlite3.connect("banco.db")
-    cursor = conn.cursor()
-    cursor.execute(
-        "UPDATE itens SET nome = ?, quantidade = ? WHERE id = ?",
-        (item.nome, item.quantidade, item_id)
-    )
-    conn.commit()
-    conn.close()
-    return {"mensagem": f"Item {item_id} atualizado com sucesso!"}
+    try:
+        conn = sqlite3.connect("banco.db")
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE itens SET nome = ?, quantidade = ? WHERE id = ?",
+            (item.nome, item.quantidade, item_id)
+        )
+        conn.commit()
+        conn.close()
+        logging.info(f"Item {item_id} atualizado com sucesso.")
+        return {"mensagem": f"Item {item_id} atualizado com sucesso!"}
+    except Exception as e:
+        logging.error(f"Erro ao atualizar item {item_id}: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao atualizar item.")
 
 @app.delete("/api/itens/{item_id}")
 def deletar_item(item_id: int):
-    conn = sqlite3.connect("banco.db")
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM itens WHERE id = ?", (item_id,))
-    conn.commit()
-    conn.close()
-    return {"mensagem": "Removido com sucesso!"}
+    try:
+        conn = sqlite3.connect("banco.db")
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM itens WHERE id = ?", (item_id,))
+        conn.commit()
+        conn.close()
+        logging.warning(f"Item {item_id} deletado do sistema.")
+        return {"mensagem": "Removido com sucesso!"}
+    except Exception as e:
+        logging.error(f"Erro ao deletar item {item_id}: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao excluir item.")
 
 @app.get("/api/logs")
 def listar_logs():
-    conn = sqlite3.connect("banco.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT moeda, valor, data_coleta FROM logs_automacao ORDER BY id DESC LIMIT 5")
-    rows = cursor.fetchall()
-    conn.close()
-    return {"dados": [{"moeda": r[0], "valor": r[1], "data": r[2]} for r in rows]}
+    try:
+        conn = sqlite3.connect("banco.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT moeda, valor, data_coleta FROM logs_automacao ORDER BY id DESC LIMIT 5")
+        rows = cursor.fetchall()
+        conn.close()
+        return {"dados": [{"moeda": r[0], "valor": r[1], "data": r[2]} for r in rows]}
+    except Exception as e:
+        logging.error(f"Erro ao buscar logs de automação: {e}")
+        return {"dados": []}
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -94,7 +140,7 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel Full-Stack - Busca Instantânea</title>
+    <title>Painel Full-Stack - Corporativo</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -137,7 +183,7 @@ HTML_TEMPLATE = """
         .alerta-erro { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
         .lista-container {
             text-align: left;
-            max-height: 120px;
+            max-height: 110px;
             overflow-y: auto;
             border: 1px solid #eee;
             background: #f9f9f9;
@@ -161,7 +207,7 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="painel">
-        <h1>Dashboard & Estoque</h1>
+        <h1>Dashboard Corporativo</h1>
         
         <div id="mensagemAlerta" class="alerta"></div>
 
@@ -173,7 +219,6 @@ HTML_TEMPLATE = """
         <button class="btn-cancelar" id="btnCancelar" onclick="limparFormulario()">Cancelar Edição</button>
 
         <h3>Lista de Estoque</h3>
-        <!-- Campo de Pesquisa Instantânea -->
         <input type="text" id="filtroBusca" placeholder="🔍 Pesquisar produto no estoque..." onkeyup="filtrarEstoque()">
         <div class="lista-container" id="listaItens">Carregando estoque...</div>
 
@@ -196,8 +241,7 @@ HTML_TEMPLATE = """
             try {
                 const resEstoque = await fetch('/api/itens');
                 const jsonEstoque = await resEstoque.json();
-                listaGlobalItens = jsonEstoque.dados; // Salva na variável global
-                
+                listaGlobalItens = jsonEstoque.dados;
                 renderizarItens(listaGlobalItens);
 
                 const resLogs = await fetch('/api/logs');
