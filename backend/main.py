@@ -1,10 +1,10 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import sqlite3
 
-app = FastAPI(title="Sistema de Gestão Full-Stack - CRUD Completo")
+app = FastAPI(title="Sistema de Gestão Full-Stack - Blindado")
 
 app.add_middleware(
     CORSMiddleware,
@@ -36,9 +36,10 @@ def init_db():
 
 init_db()
 
+# --- MODELO BLINDADO COM PYDANTIC ---
 class Item(BaseModel):
-    nome: str
-    quantidade: int
+    nome: str = Field(..., min_length=2, description="O nome deve ter pelo menos 2 caracteres")
+    quantidade: int = Field(..., gt=0, description="A quantidade deve ser maior que zero")
 
 @app.get("/api/itens")
 def listar_itens():
@@ -94,7 +95,7 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel Full-Stack - CRUD com Edição</title>
+    <title>Painel Full-Stack - Blindado</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -107,7 +108,7 @@ HTML_TEMPLATE = """
         }
         .painel {
             background-color: white;
-            padding: 30px;
+            padding: 25px;
             border-radius: 10px;
             box-shadow: 0 4px 8px rgba(0,0,0,0.1);
             width: 480px;
@@ -126,9 +127,18 @@ HTML_TEMPLATE = """
         .btn-salvar { background-color: #28a745; color: white; border: none; font-weight: bold; cursor: pointer; }
         .btn-salvar:hover { background-color: #218838; }
         .btn-cancelar { background-color: #6c757d; color: white; border: none; font-weight: bold; cursor: pointer; display: none; margin-top: 5px;}
+        .alerta {
+            padding: 8px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            display: none;
+        }
+        .alerta-sucesso { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .alerta-erro { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
         .lista-container {
             text-align: left;
-            max-height: 140px;
+            max-height: 120px;
             overflow-y: auto;
             border: 1px solid #eee;
             background: #f9f9f9;
@@ -154,10 +164,12 @@ HTML_TEMPLATE = """
     <div class="painel">
         <h1>Dashboard & Estoque</h1>
         
+        <div id="mensagemAlerta" class="alerta"></div>
+
         <h3 id="tituloForm">Cadastrar Novo Item</h3>
         <input type="hidden" id="editandoId" value="">
-        <input type="text" id="nomeItem" placeholder="Nome do Produto">
-        <input type="number" id="qtdItem" placeholder="Quantidade">
+        <input type="text" id="nomeItem" placeholder="Nome do Produto (Mín. 2 letras)">
+        <input type="number" id="qtdItem" placeholder="Quantidade (Maior que 0)">
         <button class="btn-salvar" id="btnSalvar" onclick="salvarItem()">Salvar no Banco</button>
         <button class="btn-cancelar" id="btnCancelar" onclick="limparFormulario()">Cancelar Edição</button>
 
@@ -168,6 +180,14 @@ HTML_TEMPLATE = """
     </div>
 
     <script>
+        function mostrarAlerta(texto, tipo) {
+            const alerta = document.getElementById('mensagemAlerta');
+            alerta.innerText = texto;
+            alerta.className = "alerta " + (tipo === 'sucesso' ? 'alerta-sucesso' : 'alerta-erro');
+            alerta.style.display = "block";
+            setTimeout(() => { alerta.style.display = "none"; }, 4000);
+        }
+
         async function carregarTudo() {
             try {
                 const resEstoque = await fetch('/api/itens');
@@ -213,24 +233,42 @@ HTML_TEMPLATE = """
             const nome = document.getElementById('nomeItem').value;
             const quantidade = document.getElementById('qtdItem').value;
 
-            if (!nome || !quantidade) return alert("Preencha todos os campos!");
-
-            if (id === "") {
-                await fetch('/api/itens', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ nome, quantidade: parseInt(quantidade) })
-                });
-            } else {
-                await fetch(`/api/itens/${id}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ nome, quantidade: parseInt(quantidade) })
-                });
+            if (!nome || !quantidade) {
+                mostrarAlerta("Preencha todos os campos!", "erro");
+                return;
             }
 
-            limparFormulario();
-            carregarTudo();
+            if (parseInt(quantidade) <= 0) {
+                mostrarAlerta("A quantidade deve ser maior que zero!", "erro");
+                return;
+            }
+
+            try {
+                let resposta;
+                if (id === "") {
+                    resposta = await fetch('/api/itens', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ nome, quantidade: parseInt(quantidade) })
+                    });
+                } else {
+                    resposta = await fetch(`/api/itens/${id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ nome, quantidade: parseInt(quantidade) })
+                    });
+                }
+
+                if (resposta.ok) {
+                    mostrarAlerta(id === "" ? "Item cadastrado com sucesso!" : "Item atualizado com sucesso!", "sucesso");
+                    limparFormulario();
+                    carregarTudo();
+                } else {
+                    mostrarAlerta("Erro de validação nos dados enviados.", "erro");
+                }
+            } catch (e) {
+                mostrarAlerta("Erro de conexão com o servidor.", "erro");
+            }
         }
 
         function prepararEdicao(id, nome, quantidade) {
@@ -253,6 +291,7 @@ HTML_TEMPLATE = """
 
         async function excluirItem(id) {
             await fetch(`/api/itens/${id}`, { method: 'DELETE' });
+            mostrarAlerta("Item removido com sucesso!", "sucesso");
             carregarTudo();
         }
 
